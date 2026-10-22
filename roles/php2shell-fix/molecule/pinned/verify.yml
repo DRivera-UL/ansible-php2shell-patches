@@ -1,0 +1,58 @@
+---
+- name: Verify the pinned 8.3 package path
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Read the installed PHP release
+      ansible.builtin.command: php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;'
+      register: php_release
+      changed_when: false
+
+    - name: The pin installed PHP 8.3
+      ansible.builtin.assert:
+        that:
+          - php_release.stdout == "8.3"
+        fail_msg: "Expected PHP 8.3, got '{{ php_release.stdout | default('') }}'."
+
+    - name: Check the Ondrej repository
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.d/ondrej-php.sources
+      register: ondrej_repo
+
+    - name: The pin added the Ondrej PHP repository
+      ansible.builtin.assert:
+        that:
+          - ondrej_repo.stat.exists
+
+    - name: Confirm the pinned packages are installed
+      ansible.builtin.command: dpkg-query -W -f '${Package} ${Status}\n' php8.3 php8.3-cli php8.3-common php8.3-fpm
+      register: php_packages
+      changed_when: false
+
+    - name: PHP 8.3 packages from the pin are installed
+      ansible.builtin.assert:
+        that:
+          - "'php8.3 install ok installed' in php_packages.stdout"
+          - "'php8.3-cli install ok installed' in php_packages.stdout"
+          - "'php8.3-common install ok installed' in php_packages.stdout"
+          - "'php8.3-fpm install ok installed' in php_packages.stdout"
+
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: PHP 8.3 FPM is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services["php8.3-fpm.service"].state == "running"
+
+    - name: Look for a source build
+      ansible.builtin.find:
+        paths: /opt
+        patterns: php-*-patched
+        file_type: directory
+      register: patched_builds
+
+    - name: PHP 8.3 is not compiled from source
+      ansible.builtin.assert:
+        that:
+          - patched_builds.matched == 0

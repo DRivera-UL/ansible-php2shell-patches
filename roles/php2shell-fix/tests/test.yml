@@ -1,0 +1,6 @@
+---
+- name: Test php2shell-fix
+  hosts: localhost
+  remote_user: root
+  roles:
+    - php2shell-fix

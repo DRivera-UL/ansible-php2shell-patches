@@ -1,0 +1,47 @@
+---
+role_name_check: 2
+
+dependency:
+  name: shell
+  command: bash molecule/lint.sh
+
+driver:
+  name: docker
+
+platforms:
+  - name: php2shell-pinned
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    privileged: true
+    cgroupns_mode: host
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /tmp
+    env:
+      container: docker
+
+provisioner:
+  name: ansible
+  inventory:
+    host_vars:
+      localhost:
+        ansible_python_interpreter: "{{ lookup('env', 'MOLECULE_LOCAL_PYTHON') or 'auto' }}"
+    group_vars:
+      all:
+        patch_type: update
+        php_target_version: "8.3"
+        backport_type: patch
+
+scenario:
+  name: pinned
+  test_sequence:
+    - dependency
+    - syntax
+    - create
+    - converge
+    - idempotence
+    - verify
+    - destroy

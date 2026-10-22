@@ -1,0 +1,6 @@
+---
+- name: Patch PHP2Shell
+  hosts: all
+  become: true
+  roles:
+    - php2shell-fix

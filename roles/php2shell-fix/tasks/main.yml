@@ -1,0 +1,216 @@
+---
+- name: Check if PHP is installed
+  ansible.builtin.command: which php
+  register: php_binary
+  changed_when: false
+  failed_when: false
+
+- name: Set PHP installed fact
+  ansible.builtin.set_fact:
+    php_installed: "{{ php_binary.rc == 0 }}"
+  changed_when: false
+
+- name: Get PHP version
+  ansible.builtin.command: php -r 'echo PHP_VERSION;'
+  register: php_version_cmd
+  changed_when: false
+  when: php_installed
+
+- name: Set PHP version fact
+  ansible.builtin.set_fact:
+    php_version: "{{ php_version_cmd.stdout }}"
+  when: php_installed
+  changed_when: false
+
+- name: Display result
+  ansible.builtin.debug:
+    msg: >-
+      PHP installed={{ php_installed }}
+      version={{ php_version | default('None') }}
+
+- name: Set PHP facts
+  ansible.builtin.set_fact:
+    php_installed: "{{ php_binary.rc == 0 }}"
+    current_php_version: "{{ php_version_cmd.stdout.split('.')[:2] | join('.') if php_binary.rc == 0 else '' }}"
+  changed_when: false
+
+- name: Display current PHP version
+  ansible.builtin.debug:
+    msg: >-
+      PHP Installed={{ php_installed }}
+      Current Version={{ current_php_version | default('None') }}
+
+- name: Use installed version when detect selected
+  ansible.builtin.set_fact:
+    desired_php_version: "{{ current_php_version }}"
+  changed_when: false
+  when:
+    - patch_type == "update"
+    - php_target_version == "detect"
+    - php_installed
+
+- name: Use explicit target version
+  ansible.builtin.set_fact:
+    desired_php_version: "{{ php_target_version }}"
+  changed_when: false
+  when:
+    - patch_type == "update"
+    - php_target_version is defined
+    - php_target_version not in ['detect', '', None]
+
+- name: Default to latest
+  ansible.builtin.set_fact:
+    desired_php_version: "latest"
+  changed_when: false
+  when:
+    - patch_type == "update"
+    - desired_php_version is not defined
+
+- name: Upgrade PHP packages to latest available
+  ansible.builtin.apt:
+    name:
+      - php
+      - php-cli
+      - php-common
+      - php-fpm
+    state: latest
+    update_cache: true
+    cache_valid_time: 3600
+  when: desired_php_version == "latest"
+
+- name: Backport Fix for PHP
+  when: desired_php_version != "latest"
+  block:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - software-properties-common
+          - ca-certificates
+          - apt-transport-https
+          - lsb-release
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Add Ondrej PHP repository
+      ansible.builtin.deb822_repository:
+        name: ondrej-php
+        types: [deb]
+        uris: https://ppa.launchpadcontent.net/ondrej/php/ubuntu
+        suites: "{{ ansible_distribution_release }}"
+        components: [main]
+        signed_by: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x4F4EA0AAE5267A6C
+        state: present
+
+    - name: Update cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install selected PHP version
+      ansible.builtin.apt:
+        name:
+          - "php{{ desired_php_version }}"
+          - "php{{ desired_php_version }}-cli"
+          - "php{{ desired_php_version }}-common"
+          - "php{{ desired_php_version }}-fpm"
+        state: latest
+      notify: Restart PHP
+
+    - name: Clone application code
+      ansible.builtin.git:
+        repo: https://github.com/myorg/myapp.git
+        dest: "{{ php2shell_patch_git_repo_location }}"
+        version: main
+      when: desired_php_version is version('8.2', '<')
+
+    - name: Execute the backport patch
+      ansible.builtin.command:
+        command: >
+          ./build/build-patched-php.sh "{{ desired_php_version }}.33"
+          patches/php-{{ desired_php_version }}-enhanced-universal.patch
+          /opt/php-{{ desired_php_version }}-patched
+          # Syntax looks wrong, fix later
+        creates: "/opt/php-{{ desired_php_version }}-patched/bin/php"
+      when:
+        - desired_php_version is version('8.2', '<')
+        - backport_type == "patch"
+      notify: Restart PHP
+
+    - name: Execute the backport harden
+      ansible.builtin.command:
+        command: >
+          ./build/build-patched-php.sh "{{ desired_php_version }}.33"
+          patches/php-{{ desired_php_version }}-minimal.patch
+          /opt/php-{{ desired_php_version }}-patched
+        creates: "/opt/php-{{ desired_php_version }}-patched/bin/php"
+      when:
+        - desired_php_version is version('8.2', '<')
+        - backport_type == "harden"
+      notify: Restart PHP
+
+    - name: Patch PHP 5.6
+      ansible.posix.patch:
+        src: >-
+          "{{ php2shell_patch_git_repo_location }}
+          /patches/php-5.6-enhanced-universal.patch"
+        basedir: "{{ php2shell_patch_git_repo_location }}/php-5.6"
+        strip: 1
+      when:
+        - desired_php_version == "5.6"
+        - backport_type == "patch"
+      notify: Restart PHP
+
+    - name: Harden PHP 5.6
+      ansible.posix.patch:
+        src: >-
+          "{{ php2shell_patch_git_repo_location }}
+          /patches/php-5.6-community-backport.patch"
+        basedir: "{{ php2shell_patch_git_repo_location }}/php-5.6"
+        strip: 1
+      when:
+        - desired_php_version == "5.6"
+        - backport_type == "harden"
+      notify: Restart PHP
+
+    - name: Configure PHP 5.6
+      ansible.builtin.command:
+        cmd: >
+          ./configure
+          --prefix=/opt/php-5.6-patched
+          --disable-cgi
+          --enable-fpm
+          --without-openssl
+          --with-zlib
+          --enable-mbstring
+          --with-sqlite3
+          --with-pdo-sqlite
+          --enable-session
+          --with-gettext
+          --enable-sockets
+          --without-curl
+          --without-pear
+          --disable-phpdbg
+        chdir: "{{ php2shell_patch_git_repo_location }}/php-5.6"
+        creates: "{{ php2shell_patch_git_repo_location }}/php-5.6/Makefile"
+      when: desired_php_version == "5.6"
+
+    - name: Build PHP 5.6
+      ansible.builtin.command:
+        cmd: make -j{{ ansible_processor_vcpus | default(1) }}
+        chdir: "{{ php2shell_patch_git_repo_location }}/php-5.6"
+        creates: "{{ php2shell_patch_git_repo_location }}/php-5.6/sapi/cli/php"
+      when: desired_php_version == "5.6"
+
+# Note to self, varabilize the upgrade paths (harden or patch) since the
+# command is similar and follows a pattern, can make the code more consise
+# to read. Also make a handler for the make since it is the same code.
+
+- name: Verify PHP version after upgrade
+  ansible.builtin.command: php -v
+  register: php_verify
+  changed_when: false
+
+- name: Show final PHP version
+  ansible.builtin.debug:
+    var: php_verify.stdout_lines

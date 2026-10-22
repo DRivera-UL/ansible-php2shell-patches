@@ -1,0 +1,17 @@
+---
+# Options include: upgrade, backport, detect
+patch_type: upgrade
+
+# Options include: 8.2, 8.3, 8.4, 8.5, latests
+# Only comes in to effect if `patch_type:` is set to `upgrade`
+upgrade_version: latest
+
+# Options inlcude: patch or harden
+# The `patch` option rebuilds the legacy binaries from
+# source and attempts to harden *known* attack surface areas.
+# The `harden` security option removes the attack
+# surface but disables uploads in PHP
+backport_type: patch
+
+# Checkout used by the legacy source build (PHP older than 8.2).
+php2shell_patch_git_repo_location: /usr/local/src/php2shell-patches

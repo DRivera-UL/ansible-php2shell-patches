@@ -1,0 +1,55 @@
+---
+- name: Verify detection kept the installed major
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Read the installed PHP release
+      ansible.builtin.command: php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;'
+      register: php_release
+      changed_when: false
+
+    - name: Detection stayed on Ubuntu 24.04's PHP 8.3
+      ansible.builtin.assert:
+        that:
+          - php_release.stdout == "8.3"
+        fail_msg: "Expected the detected major 8.3, got '{{ php_release.stdout | default('') }}'."
+
+    - name: Check the Ondrej repository
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.d/ondrej-php.sources
+      register: ondrej_repo
+
+    - name: Detection of a supported major uses the pinned package path
+      ansible.builtin.assert:
+        that:
+          - ondrej_repo.stat.exists
+
+    - name: Confirm the 8.3 FPM package is installed
+      ansible.builtin.command: dpkg-query -W -f '${Status}' php8.3-fpm
+      register: php_fpm
+      changed_when: false
+
+    - name: PHP 8.3 FPM is installed
+      ansible.builtin.assert:
+        that:
+          - "'install ok installed' in php_fpm.stdout"
+
+    - name: Collect service facts
+      ansible.builtin.service_facts:
+
+    - name: PHP 8.3 FPM is running
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services["php8.3-fpm.service"].state == "running"
+
+    - name: Look for a source build
+      ansible.builtin.find:
+        paths: /opt
+        patterns: php-*-patched
+        file_type: directory
+      register: patched_builds
+
+    - name: A supported major is not compiled from source
+      ansible.builtin.assert:
+        that:
+          - patched_builds.matched == 0

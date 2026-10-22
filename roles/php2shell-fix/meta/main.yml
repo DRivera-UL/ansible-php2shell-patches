@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: Dante Rivera
+  description: Role to fix CVE-2026-109618 & CVE-2026-109619 (PHP2Shell)
+  license: license GPL-3.0-only
+  min_ansible_version: "2.1"
+  galaxy_tags:
+    - php
+    - php2shell
+    - security
+    - patching
+dependencies: []

@@ -1,0 +1,12 @@
+---
+- name: Prepare an installed PHP for detection
+  hosts: all
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install the distro PHP CLI
+      ansible.builtin.apt:
+        name: php-cli
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
